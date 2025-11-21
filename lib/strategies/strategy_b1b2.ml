@@ -1,7 +1,7 @@
 open Core
 open Types
 open Time_utils
-module CM = Cost_model
+module SC = Strategy_common
 
 module Setup_builder = Setup_builder_b1b2
 
@@ -30,92 +30,39 @@ let default_config = {
 let strategy_id = "b1b2"
 
 let parameter_specs =
-  [
-    Parameters.make
-      ~name:"session_start_min"
-      ~default:(Float.of_int rth_start_min)
-      ~bounds:(0., 24. *. 60.)
-      ~integer:true
-      ~description:"session start minute-of-day (ET) used for entry gating"
-      ();
-    Parameters.make
-      ~name:"session_end_min"
-      ~default:(Float.of_int rth_end_min)
-      ~bounds:(0., 24. *. 60.)
-      ~integer:true
-      ~description:"session end minute-of-day (ET) used for entry gating"
-      ();
-    Parameters.make
-      ~name:"qty"
-      ~default:1.0
-      ~bounds:(0.1, 20.)
-      ~description:"contracts per trade" ();
-    Parameters.make ~name:"cost.slippage_roundtrip_ticks" ~default:1.0 ~bounds:(0., 3.)
-      ~description:"assumed round-trip slippage in ticks" ();
-    Parameters.make ~name:"cost.fee_per_contract" ~default:4.0 ~bounds:(0., 10.)
-      ~description:"exchange+broker fee per contract" ();
-    Parameters.make ~name:"cost.equity_base" ~default:0.0 ~bounds:(0., 5_000_000.)
-      ~description:"account equity in USD for pct PnL; 0 => disabled" ();
-  ]
+  SC.Config.session_params ~default_start:default_config.session_start_min
+    ~default_end:default_config.session_end_min
+  @ [
+      Parameters.make ~name:"qty" ~default:1.0 ~bounds:(0.1, 20.)
+        ~description:"contracts per trade" ();
+    ]
+  @ SC.Config.cost_params default_config.cost
 
 let config_of_params (m : Parameters.value_map) : config =
-  let get name default =
-    Map.find m name |> Option.value ~default
+  let session_start_min, session_end_min =
+    SC.Config.session_of_params
+      ~defaults:(default_config.session_start_min, default_config.session_end_min)
+      m
   in
-  let ss = get "session_start_min" (Float.of_int default_config.session_start_min) |> Int.of_float in
-  let se = get "session_end_min" (Float.of_int default_config.session_end_min) |> Int.of_float in
-  let qty = get "qty" default_config.qty in
-  let cost : Cost_model.config =
-    {
-      tick_size = default_config.cost.tick_size;
-      tick_value = default_config.cost.tick_value;
-      slippage_roundtrip_ticks = get "cost.slippage_roundtrip_ticks" default_config.cost.slippage_roundtrip_ticks;
-      fee_per_contract = get "cost.fee_per_contract" default_config.cost.fee_per_contract;
-      equity_base =
-        let eb = get "cost.equity_base" 0.0 in
-        if Float.(eb <= 0.) then None else Some eb;
-    }
-  in
-  {
-    session_start_min = Int.clamp_exn ~min:0 ~max:1439 ss;
-    session_end_min   = Int.clamp_exn ~min:0 ~max:1439 se;
-    qty;
-    cost;
-  }
+  let qty = Map.find m "qty" |> Option.value ~default:default_config.qty in
+  let cost = SC.Config.cost_of_params ~defaults:default_config.cost m in
+  { session_start_min; session_end_min; qty; cost }
 
 let record_trade ~(cfg : config) ~(plan : trade_plan) ~(active : active_state)
     ~(exit_ts : timestamp) ~(exit_price : float) ~(reason : exit_reason) =
-  let pnl_pts =
-    match plan.direction with
-    | Long  -> exit_price -. plan.entry_price
-    | Short -> plan.entry_price -. exit_price
-  in
-  let pnl_R = pnl_pts /. plan.r_pts in
-  let duration_min = Float.of_int (exit_ts.minute_of_day - active.entry_ts.minute_of_day) in
-  let t = {
-    date         = exit_ts.date;
-    direction    = plan.direction;
-    entry_ts     = active.entry_ts;
-    exit_ts;
-    entry_price  = plan.entry_price;
-    exit_price;
-    qty          = cfg.qty;
-    r_pts        = plan.r_pts;
-    pnl_pts;
-    pnl_R;
-    pnl_usd      = 0.0;
-    pnl_pct      = None;
-    duration_min;
-    exit_reason  = reason;
-    meta         = [
+  let meta =
+    [
       ("strategy", strategy_id);
       ("target_mult", Float.to_string plan.target_mult);
       ("abr_prev", Float.to_string plan.abr_prev);
       ("b1_range", Float.to_string plan.b1_range);
-      ("b2_follow", (match plan.b2_follow with Follow_good -> "good" | Follow_poor -> "poor"));
-    ];
-  } in
-  CM.apply ~qty:cfg.qty cfg.cost t
+      ("b2_follow",
+       match plan.b2_follow with Follow_good -> "good" | Follow_poor -> "poor");
+    ]
+  in
+  SC.Trade.make ~qty:cfg.qty ~r_pts:plan.r_pts cfg.cost plan.direction
+    ~entry_ts:active.entry_ts ~entry_px:plan.entry_price
+    ~exit_ts ~exit_px:exit_price ~reason ~meta
 
 module Make (Cfg : sig val cfg : config end) = struct
   module Policy : Policy_sig.S = struct
@@ -137,7 +84,8 @@ module Make (Cfg : sig val cfg : config end) = struct
       match state.plan with
       | None -> (state, [])
       | Some plan ->
-          if minute_of_day < b2_min || minute_of_day > Cfg.cfg.session_end_min then
+          let in_session = SC.Session.within ~start:Cfg.cfg.session_start_min ~end_:Cfg.cfg.session_end_min bar in
+          if minute_of_day < b2_min || not in_session then
             (state, [])
           else begin
             if plan.downgrade_after_b2 && Float.(plan.target_mult = 2.0) && minute_of_day > plan.b2_end_minute then begin
@@ -199,8 +147,19 @@ module Make (Cfg : sig val cfg : config end) = struct
       match state.plan, state.trade_state, last_bar with
       | Some plan, Active active, Some lb ->
           let trade =
-          record_trade ~cfg:Cfg.cfg ~plan ~active
-            ~exit_ts:lb.ts ~exit_price:lb.close ~reason:Eod_flat
+            SC.Session.eod_flat ~qty:Cfg.cfg.qty ~r_pts:plan.r_pts Cfg.cfg.cost
+              ~direction:plan.direction ~entry_ts:active.entry_ts
+              ~entry_px:plan.entry_price ~last_bar:lb
+              ~meta:[
+                ("strategy", strategy_id);
+                ("target_mult", Float.to_string plan.target_mult);
+                ("abr_prev", Float.to_string plan.abr_prev);
+                ("b1_range", Float.to_string plan.b1_range);
+                ("b2_follow",
+                 match plan.b2_follow with
+                 | Follow_good -> "good"
+                 | Follow_poor -> "poor");
+              ]
           in
           ({ plan = state.plan; trade_state = Done }, [ trade ])
       | _ -> (state, [])
@@ -210,7 +169,7 @@ module Make (Cfg : sig val cfg : config end) = struct
     id = strategy_id;
     session_start_min = Cfg.cfg.session_start_min;
     session_end_min   = Cfg.cfg.session_end_min;
-    build_setups = Setup_builder.compute_daily_context_and_setups;
+    build_setups = Some Setup_builder.compute_daily_context_and_setups;
     policy = (module Policy);
   }
 end

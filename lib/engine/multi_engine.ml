@@ -33,7 +33,11 @@ type strat_ctx =
     } -> strat_ctx
 
 let init_ctx strat filename =
-  let setups = strat.build_setups filename in
+  let setups =
+    match strat.build_setups with
+    | None -> Date.Table.create ()
+    | Some f -> f filename
+  in
   let module P = (val strat.policy : Policy_sig.S) in
   StratCtx {
     strat;

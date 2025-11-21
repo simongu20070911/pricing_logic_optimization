@@ -5,7 +5,7 @@ type strategy = {
   id : string;
   session_start_min : int;
   session_end_min   : int;
-  build_setups : string -> setup Date.Table.t;
+  build_setups : (string -> setup Date.Table.t) option;
   policy : (module Policy_sig.S);
 }
 

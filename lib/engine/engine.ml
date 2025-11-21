@@ -7,7 +7,7 @@ type strategy = {
   id : string;
   session_start_min : int;
   session_end_min   : int;
-  build_setups : string -> setup Date.Table.t;
+  build_setups : (string -> setup Date.Table.t) option;
   policy : (module POLICY);
 }
 
@@ -20,7 +20,11 @@ type run_result = {
 }
 
 let run (strategy : strategy) ~(filename : string) : run_result =
-  let setups_tbl = strategy.build_setups filename in
+  let setups_tbl =
+    match strategy.build_setups with
+    | None -> Date.Table.create ()
+    | Some f -> f filename
+  in
   let module P = (val strategy.policy : POLICY) in
 
   let trades_acc : trade list ref = ref [] in

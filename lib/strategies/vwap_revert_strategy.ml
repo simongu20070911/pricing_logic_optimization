@@ -4,7 +4,7 @@ open Time_utils
 
 module F = Features
 module PS = Position_sizing
-module CM = Cost_model
+module SC = Strategy_common
 
 [@@@warning "-27-32-69"]
 
@@ -65,29 +65,12 @@ let parameter_specs =
       ~description:"hard stop distance in ticks" ();
     Parameters.make ~name:"max_units" ~default:3. ~bounds:(1., 10.)
       ~integer:true ~description:"cap on volatility-targeted units" ();
-    Parameters.make ~name:"cost.slippage_roundtrip_ticks" ~default:1.0 ~bounds:(0., 3.)
-      ~description:"assumed round-trip slippage in ticks" ();
-    Parameters.make ~name:"cost.fee_per_contract" ~default:4.0 ~bounds:(0., 10.)
-      ~description:"exchange+broker fee per contract" ();
-    Parameters.make ~name:"cost.equity_base" ~default:0.0 ~bounds:(0., 5_000_000.)
-      ~description:"account equity in USD for pct PnL; 0 => disabled" ();
   ]
+  @ SC.Config.cost_params default_config.cost
 
 let config_of_params (m : Parameters.value_map) : config =
   let get name default = Map.find m name |> Option.value ~default in
-  let cost : CM.config =
-    {
-      tick_size = default_config.cost.tick_size;
-      tick_value = default_config.cost.tick_value;
-      slippage_roundtrip_ticks =
-        get "cost.slippage_roundtrip_ticks" default_config.cost.slippage_roundtrip_ticks;
-      fee_per_contract =
-        get "cost.fee_per_contract" default_config.cost.fee_per_contract;
-      equity_base =
-        let eb = get "cost.equity_base" 0.0 in
-        if Float.(eb <= 0.) then None else Some eb;
-    }
-  in
+  let cost = SC.Config.cost_of_params ~defaults:default_config.cost m in
   {
     a1 = get "a1" default_config.a1;
     a2 = get "a2" default_config.a2;
@@ -143,46 +126,21 @@ let compute_signal cfg (snap : F.snapshot) : float option =
 
 let build_trade ~direction ~(entry_time : timestamp) ~entry_price
     ~(exit_time : timestamp) ~exit_price
-    ~(reason : exit_reason) ~(target_units : int) : trade =
-  let pnl_pts =
-    match direction with
-    | Long  -> exit_price -. entry_price
-    | Short -> entry_price -. exit_price
-  in
-  let r_pts = 1.0 in
-  let pnl_R = pnl_pts /. r_pts in
-  let duration_min =
-    Float.of_int (exit_time.minute_of_day - entry_time.minute_of_day)
-  in
-  {
-    date         = exit_time.date;
-    direction    = direction;
-    entry_ts     = entry_time;
-    exit_ts      = exit_time;
-    entry_price  = entry_price;
-    exit_price   = exit_price;
-    qty          = Float.of_int target_units;
-    r_pts        = r_pts;
-    pnl_pts      = pnl_pts;
-    pnl_R        = pnl_R;
-    pnl_usd      = 0.0;
-    pnl_pct      = None;
-    duration_min = duration_min;
-    exit_reason  = reason;
-    meta         = [
-      ("strategy", strategy_id);
-      ("target_units", Int.to_string target_units);
-    ];
-  }
+    ~(reason : exit_reason) ~(target_units : int) ~(state : t)
+    ~(meta : (string * string) list) : trade =
+  SC.Trade.make
+    ~qty:(Float.of_int target_units) ~r_pts:1.0 state.cfg.cost direction
+    ~entry_ts:entry_time ~entry_px:entry_price
+    ~exit_ts:exit_time ~exit_px:exit_price ~reason
+    ~meta:(("strategy", strategy_id) :: ("target_units", Int.to_string target_units) :: meta)
 
 let on_bar (state : t) (bar : bar_1m) : t * trade list =
   let features = F.update state.features bar in
   let snap = F.snapshot features in
-  let minute = bar.ts.minute_of_day in
   let cfg = state.cfg in
   let stop_distance_pts = cfg.stop_ticks *. cfg.cost.tick_size in
 
-  if minute < rth_start_min || minute > rth_end_min then
+  if not (SC.Session.within ~start:rth_start_min ~end_:rth_end_min bar) then
     ({ features; position = Flat; cfg }, [])
   else
     let signal_opt = compute_signal cfg snap in
@@ -212,8 +170,7 @@ let on_bar (state : t) (bar : bar_1m) : t * trade list =
             build_trade
               ~direction:Long ~entry_time:entry_ts ~entry_price
               ~exit_time:bar.ts ~exit_price:stop_price ~reason:Stop
-              ~target_units:pos.target_units
-            |> CM.apply ~qty:(Float.of_int pos.target_units) cfg.cost
+              ~target_units:pos.target_units ~state ~meta:[]
           in
           ({ features; position = Flat; cfg }, [ trade ])
         else
@@ -235,8 +192,7 @@ let on_bar (state : t) (bar : bar_1m) : t * trade list =
               build_trade
                 ~direction:Long ~entry_time:entry_ts ~entry_price
                 ~exit_time:bar.ts ~exit_price:bar.close ~reason:Target
-                ~target_units:pos.target_units
-              |> CM.apply ~qty:(Float.of_int pos.target_units) cfg.cost
+                ~target_units:pos.target_units ~state ~meta:[]
             in
             ({ features; position = Flat; cfg }, [ trade ])
           else
@@ -251,8 +207,7 @@ let on_bar (state : t) (bar : bar_1m) : t * trade list =
             build_trade
               ~direction:Short ~entry_time:entry_ts ~entry_price
               ~exit_time:bar.ts ~exit_price:stop_price ~reason:Stop
-              ~target_units:pos.target_units
-            |> CM.apply ~qty:(Float.of_int pos.target_units) cfg.cost
+              ~target_units:pos.target_units ~state ~meta:[]
           in
           ({ features; position = Flat; cfg }, [ trade ])
         else
@@ -274,8 +229,7 @@ let on_bar (state : t) (bar : bar_1m) : t * trade list =
               build_trade
                 ~direction:Short ~entry_time:entry_ts ~entry_price
                 ~exit_time:bar.ts ~exit_price:bar.close ~reason:Target
-                ~target_units:pos.target_units
-              |> CM.apply ~qty:(Float.of_int pos.target_units) cfg.cost
+                ~target_units:pos.target_units ~state ~meta:[]
             in
             ({ features; position = Flat; cfg }, [ trade ])
           else
@@ -290,8 +244,7 @@ let on_session_end (state : t) (last_bar : bar_1m option) : t * trade list =
         build_trade
           ~direction:Long ~entry_time:pos.entry_ts ~entry_price:pos.entry_price
           ~exit_time:lb.ts ~exit_price:lb.close ~reason:Eod_flat
-          ~target_units:pos.target_units
-        |> CM.apply ~qty:(Float.of_int pos.target_units) state.cfg.cost
+          ~target_units:pos.target_units ~state ~meta:[]
       in
       ({ state with position = Flat }, [ trade ])
   | Short_pos pos, Some lb ->
@@ -299,8 +252,7 @@ let on_session_end (state : t) (last_bar : bar_1m option) : t * trade list =
         build_trade
           ~direction:Short ~entry_time:pos.entry_ts ~entry_price:pos.entry_price
           ~exit_time:lb.ts ~exit_price:lb.close ~reason:Eod_flat
-          ~target_units:pos.target_units
-        |> CM.apply ~qty:(Float.of_int pos.target_units) state.cfg.cost
+          ~target_units:pos.target_units ~state ~meta:[]
       in
       ({ state with position = Flat }, [ trade ])
 
@@ -316,7 +268,7 @@ module Make (Cfg : sig val cfg : config end) = struct
     id = strategy_id;
     session_start_min = rth_start_min;
     session_end_min   = rth_end_min;
-    build_setups = (fun _filename -> Date.Table.create ());
+    build_setups = (None : (string -> setup Core.Date.Table.t) option);
     policy = (module Policy);
   }
 end

@@ -147,6 +147,20 @@ modules:
       - tick_size : float
       - build_trade_plan : Types.setup -> Types.trade_plan option
 
+  - name: Strategy_common
+    file_ml: agents_workspace/lib/strategies/strategy_common.ml
+    file_mli: agents_workspace/lib/strategies/strategy_common.mli
+    summary: Shared trade construction, cost/session parameter helpers, and session utilities for strategies.
+    provides_values:
+      - Trade.make : qty:float -> ?r_pts:float -> Cost_model.config -> Types.direction -> entry_ts:Types.timestamp -> entry_px:float -> exit_ts:Types.timestamp -> exit_px:float -> reason:Types.exit_reason -> meta:(string * string) list -> Types.trade
+      - Config.cost_params : Cost_model.config -> Parameters.t list
+      - Config.cost_of_params : defaults:Cost_model.config -> Parameters.value_map -> Cost_model.config
+      - Config.session_params : default_start:int -> default_end:int -> Parameters.t list
+      - Config.session_of_params : defaults:(int * int) -> Parameters.value_map -> int * int
+      - Session.within : start:int -> end_:int -> Types.bar_1m -> bool
+      - Session.eod_flat : qty:float -> ?r_pts:float -> Cost_model.config -> direction:Types.direction -> entry_ts:Types.timestamp -> entry_px:float -> last_bar:Types.bar_1m -> meta:(string * string) list -> Types.trade
+      - Setup.noop : string -> Types.setup Core.Date.Table.t
+
   - name: Strategy_b1b2
     file_ml: agents_workspace/lib/strategies/strategy_b1b2.ml
     file_mli: agents_workspace/lib/strategies/strategy_b1b2.mli
@@ -189,7 +203,7 @@ modules:
   - name: Engine
     file_ml: agents_workspace/lib/engine/engine.ml
     file_mli: agents_workspace/lib/engine/engine.mli
-    summary: Generic engine that runs a policy over CSV bars and aggregates results.
+    summary: Generic engine that runs a policy over CSV bars and aggregates results; supports optional setup builders.
     provides_types:
       - Engine.strategy
       - Engine.run_result
