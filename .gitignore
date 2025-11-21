@@ -6,7 +6,6 @@ _build/
 # dune/ocaml compiler outputs
 *.cmo
 *.cmi
-*.csv
 *.cma
 *.cmx
 *.cmxa
