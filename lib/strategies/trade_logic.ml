@@ -2,8 +2,6 @@ open Core
 open Types
 open Time_utils
 
-[@@@warning "-27-32-69"]
-
 let tick_size = 0.25
 
 let build_trade_plan (s : setup) : trade_plan option =

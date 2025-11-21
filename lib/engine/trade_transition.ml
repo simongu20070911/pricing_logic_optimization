@@ -1,7 +1,7 @@
+open Core
 open Types
 
-let step ~plan ~state ~bar ~record_trade : trade_state * 'a list =
-  let minute_of_day = bar.ts.minute_of_day in
+let step ~plan ~state ~(bar : bar_1m) ~record_trade : trade_state * 'a list =
   match state with
   | No_trade | Done -> state, []
   | Pending ->

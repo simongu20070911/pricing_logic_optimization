@@ -16,3 +16,12 @@ val config_of_params : Parameters.value_map -> config
 val make_strategy : config -> Engine.strategy
 
 val strategy : Engine.strategy
+
+val make_pure_strategy : config -> Engine.pure_strategy
+
+val strategy_pure : Engine.pure_strategy
+
+module Make (_ : sig val cfg : config end) : sig
+  module Policy : Policy_sig.S
+  val strategy : Engine.strategy
+end

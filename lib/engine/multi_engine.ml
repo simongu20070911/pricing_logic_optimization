@@ -32,7 +32,7 @@ type strat_ctx =
       daily_pnl_pct_tbl : float Date.Table.t;
     } -> strat_ctx
 
-let init_ctx strat filename =
+let init_ctx (strat : Engine.strategy) filename =
   let setups =
     match strat.build_setups with
     | None -> Date.Table.create ()

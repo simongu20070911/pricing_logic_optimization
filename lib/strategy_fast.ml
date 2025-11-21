@@ -19,9 +19,12 @@ end
 
 module Engine = struct
   module Engine = Engine
+  module Strategy_sig = Strategy_sig
+  module Policy_adapter = Policy_adapter
   module Multi_engine = Multi_engine
   module Policy_sig = Policy_sig
   module Backtest = Backtest
+  module Trade_transition = Trade_transition
   module Opt_algos = Opt_algos
   module Stat_tests = Stat_tests
   module Robustness = Robustness
@@ -36,3 +39,5 @@ module Strategies = struct
   module Strategy_b1b2 = Strategy_b1b2
   module Vwap_revert_strategy = Vwap_revert_strategy
 end
+
+module Trade_logic = Trade_logic

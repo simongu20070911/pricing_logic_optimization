@@ -2,10 +2,10 @@ open Core
 open Types
 open Time_utils
 module SC = Strategy_common
+module TT = Trade_transition
 
 module Setup_builder = Setup_builder_b1b2
-
-[@@@warning "-27-32-69"]
+module SS = Strategy_sig
 
 type config = {
   session_start_min : int;
@@ -50,19 +50,84 @@ let config_of_params (m : Parameters.value_map) : config =
 
 let record_trade ~(cfg : config) ~(plan : trade_plan) ~(active : active_state)
     ~(exit_ts : timestamp) ~(exit_price : float) ~(reason : exit_reason) =
-  let meta =
-    [
-      ("strategy", strategy_id);
-      ("target_mult", Float.to_string plan.target_mult);
-      ("abr_prev", Float.to_string plan.abr_prev);
-      ("b1_range", Float.to_string plan.b1_range);
-      ("b2_follow",
-       match plan.b2_follow with Follow_good -> "good" | Follow_poor -> "poor");
-    ]
-  in
+  let meta = [
+    ("strategy", strategy_id);
+    ("target_mult", Float.to_string plan.target_mult);
+    ("abr_prev", Float.to_string plan.abr_prev);
+    ("b1_range", Float.to_string plan.b1_range);
+    ("b2_follow",
+     match plan.b2_follow with Follow_good -> "good" | Follow_poor -> "poor");
+  ] in
   SC.Trade.make ~qty:cfg.qty ~r_pts:plan.r_pts cfg.cost plan.direction
     ~entry_ts:active.entry_ts ~entry_px:plan.entry_price
     ~exit_ts ~exit_px:exit_price ~reason ~meta
+
+let downgrade_if_needed plan ~minute_of_day =
+  if plan.downgrade_after_b2 && Float.(plan.target_mult = 2.0) && minute_of_day > plan.b2_end_minute then
+    let target_price =
+      match plan.direction with
+      | Long  -> plan.entry_price +. plan.r_pts
+      | Short -> plan.entry_price -. plan.r_pts
+    in
+    { plan with target_mult = 1.0; target_price }
+  else plan
+
+module Pure (Cfg : sig val cfg : config end) : SS.S = struct
+  type state = {
+    plan : trade_plan option;
+    trade_state : trade_state;
+  }
+
+  let init setup_opt =
+    match setup_opt with
+    | None -> { plan = None; trade_state = No_trade }
+    | Some s ->
+        (match Trade_logic.build_trade_plan s with
+         | None -> { plan = None; trade_state = No_trade }
+         | Some plan -> { plan = Some plan; trade_state = Pending })
+
+  let on_trade plan trade_state bar =
+    let plan = downgrade_if_needed plan ~minute_of_day:bar.ts.minute_of_day in
+    let trade_state', trades =
+      TT.step ~plan ~state:trade_state ~bar
+        ~record_trade:(fun ~active ~exit_ts ~exit_price ~exit_reason ->
+            record_trade ~cfg:Cfg.cfg ~plan ~active ~exit_ts ~exit_price ~reason:exit_reason)
+    in
+    { plan = Some plan; trade_state = trade_state' }, trades
+
+  let step env state (bar : bar_1m) =
+    let open SS in
+    let in_session =
+      bar.ts.minute_of_day >= env.session_start_min
+      && bar.ts.minute_of_day <= env.session_end_min
+    in
+    match state.plan with
+    | None -> state, []
+    | Some plan ->
+        if bar.ts.minute_of_day < b2_min || not in_session then state, []
+        else on_trade plan state.trade_state bar
+
+  let finalize_day _env state last_bar =
+    match state.plan, state.trade_state, last_bar with
+    | Some plan, Active active, Some lb ->
+        let trade =
+          SC.Session.eod_flat ~qty:Cfg.cfg.qty ~r_pts:plan.r_pts Cfg.cfg.cost
+            ~direction:plan.direction ~entry_ts:active.entry_ts
+            ~entry_px:plan.entry_price ~last_bar:lb
+            ~meta:[
+              ("strategy", strategy_id);
+              ("target_mult", Float.to_string plan.target_mult);
+              ("abr_prev", Float.to_string plan.abr_prev);
+              ("b1_range", Float.to_string plan.b1_range);
+              ("b2_follow",
+               match plan.b2_follow with
+               | Follow_good -> "good"
+               | Follow_poor -> "poor");
+            ]
+        in
+        ({ plan = state.plan; trade_state = Done }, [ trade ])
+    | _ -> (state, [])
+end
 
 module Make (Cfg : sig val cfg : config end) = struct
   module Policy : Policy_sig.S = struct
@@ -77,7 +142,7 @@ module Make (Cfg : sig val cfg : config end) = struct
       | Some s ->
           (match Trade_logic.build_trade_plan s with
            | None -> { plan = None; trade_state = No_trade }
-           | Some plan -> { plan = Some plan; trade_state = Pending })
+      | Some plan -> { plan = Some plan; trade_state = Pending })
 
     let on_bar state (bar : bar_1m) : t * trade list =
       let minute_of_day = bar.ts.minute_of_day in
@@ -88,59 +153,14 @@ module Make (Cfg : sig val cfg : config end) = struct
           if minute_of_day < b2_min || not in_session then
             (state, [])
           else begin
-            if plan.downgrade_after_b2 && Float.(plan.target_mult = 2.0) && minute_of_day > plan.b2_end_minute then begin
-              plan.target_mult <- 1.0;
-              plan.target_price <-
-                (match plan.direction with
-                 | Long  -> plan.entry_price +. plan.r_pts
-                 | Short -> plan.entry_price -. plan.r_pts)
-            end;
-
-            match state.trade_state with
-            | No_trade | Done -> (state, [])
-            | Pending ->
-                (match plan.direction with
-                 | Long ->
-                     if Float.(bar.high >= plan.entry_price) then
-                       ({ plan = state.plan;
-                          trade_state = Active { stop_price = plan.stop_init; moved_to_be = false; entry_ts = bar.ts }}, [])
-                     else if Float.(bar.low <= plan.cancel_level) then
-                       ({ plan = state.plan; trade_state = Done }, [])
-                     else (state, [])
-                 | Short ->
-                     if Float.(bar.low <= plan.entry_price) then
-                       ({ plan = state.plan;
-                          trade_state = Active { stop_price = plan.stop_init; moved_to_be = false; entry_ts = bar.ts }}, [])
-                     else if Float.(bar.high >= plan.cancel_level) then
-                       ({ plan = state.plan; trade_state = Done }, [])
-                     else (state, []))
-            | Active active ->
-                let stopped =
-                  match plan.direction with
-                  | Long  -> Float.(bar.low <= active.stop_price)
-                  | Short -> Float.(bar.high >= active.stop_price)
-                in
-                if stopped then
-                  let trade = record_trade ~cfg:Cfg.cfg ~plan ~active ~exit_ts:bar.ts ~exit_price:active.stop_price ~reason:Stop in
-                  ({ plan = state.plan; trade_state = Done }, [trade])
-                else begin
-                  if not active.moved_to_be then begin
-                    match plan.direction with
-                    | Long when Float.(bar.high >= plan.be_trigger) -> active.stop_price <- plan.entry_price; active.moved_to_be <- true
-                    | Short when Float.(bar.low <= plan.be_trigger) -> active.stop_price <- plan.entry_price; active.moved_to_be <- true
-                    | _ -> ()
-                  end;
-                  let hit_target =
-                    match plan.direction with
-                    | Long  -> Float.(bar.high >= plan.target_price)
-                    | Short -> Float.(bar.low <= plan.target_price)
-                  in
-                  if hit_target then
-                    let trade = record_trade ~cfg:Cfg.cfg ~plan ~active ~exit_ts:bar.ts ~exit_price:plan.target_price ~reason:Target in
-                    ({ plan = state.plan; trade_state = Done }, [trade])
-                  else
-                    ({ plan = state.plan; trade_state = Active active }, [])
-                end
+            let plan = downgrade_if_needed plan ~minute_of_day in
+            let trade_state, trades =
+              TT.step ~plan ~state:state.trade_state ~bar
+                ~record_trade:(fun ~active ~exit_ts ~exit_price ~exit_reason ->
+                    record_trade ~cfg:Cfg.cfg ~plan ~active ~exit_ts ~exit_price
+                      ~reason:exit_reason)
+            in
+            ({ plan = Some plan; trade_state }, trades)
           end
 
     let on_session_end state last_bar =
@@ -163,6 +183,7 @@ module Make (Cfg : sig val cfg : config end) = struct
           in
           ({ plan = state.plan; trade_state = Done }, [ trade ])
       | _ -> (state, [])
+
   end
 
   let strategy : Engine.strategy = {
@@ -172,10 +193,27 @@ module Make (Cfg : sig val cfg : config end) = struct
     build_setups = Some Setup_builder.compute_daily_context_and_setups;
     policy = (module Policy);
   }
-end
 
+end
 let make_strategy cfg =
   let module M = Make(struct let cfg = cfg end) in
   M.strategy
 
 let strategy = make_strategy default_config
+
+let make_pure_strategy cfg =
+  let env = {
+    SS.session_start_min = cfg.session_start_min;
+    session_end_min = cfg.session_end_min;
+    qty = cfg.qty;
+    cost = cfg.cost;
+  } in
+  let module S = Pure(struct let cfg = cfg end) in
+  {
+    Engine._id = strategy_id;
+    env;
+    build_setups = Some Setup_builder.compute_daily_context_and_setups;
+    strategy = (module S);
+  }
+
+let strategy_pure = make_pure_strategy default_config

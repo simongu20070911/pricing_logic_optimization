@@ -90,8 +90,8 @@ type trade_plan = {
   cancel_level      : float;
   stop_init         : float;
   r_pts             : float;
-  mutable target_mult : float;
-  mutable target_price : float;
+  target_mult       : float;
+  target_price      : float;
   be_trigger        : float;
   b2_end_minute     : int;
   downgrade_after_b2 : bool;

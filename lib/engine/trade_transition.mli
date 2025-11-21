@@ -1,6 +1,11 @@
 open Types
 
-(** Stateless trade lifecycle transition for a single trade_plan. *)
+(** Stateless trade lifecycle transition for a single trade_plan.
+    Invariants/responsibilities:
+    - Caller gates on session windows; [step] assumes the bar is eligible.
+    - [plan] is treated as immutable; [step] will not mutate it.
+    - At most one trade is emitted per bar.
+    - Stop has precedence over target when both are touched within a bar. *)
 
 val step :
   plan:trade_plan ->
