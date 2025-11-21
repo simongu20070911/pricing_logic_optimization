@@ -2,13 +2,13 @@ project:
   name: qpa
   root: agents_workspace
   language: ocaml
-  description: Intraday ES backtesting + parameter-optimization toolkit with reusable strategy/engine components, plotting, and CLI runners.
+  description: Intraday ES backtesting & optimization toolkit with reusable engine, strategies, plotting, and CLI runners.
 
 modules:
   - name: Types
     file_ml: agents_workspace/lib/core/types.ml
     file_mli: null
-    summary: Trading domain types for bars, trades, setups, and performance stats.
+    summary: Trading domain types for bars, setups, trades, and performance stats.
     provides_types:
       - Types.direction
       - Types.timestamp
@@ -32,22 +32,22 @@ modules:
     file_mli: null
     summary: Time parsing helpers and RTH session constants.
     provides_values:
-      - "minute_ofday_of_string : string -> int"
-      - "parse_timestamp : string -> Types.timestamp"
-      - "rth_start_min : int"
-      - "rth_end_min : int"
-      - "b1_min : int"
-      - "b2_min : int"
-      - "abr_eod_min : int"
-      - "minutes_per_day : int"
+      - minute_ofday_of_string : string -> int
+      - parse_timestamp : string -> Types.timestamp
+      - rth_start_min : int
+      - rth_end_min : int
+      - b1_min : int
+      - b2_min : int
+      - abr_eod_min : int
+      - minutes_per_day : int
 
   - name: Csv_parser
     file_ml: agents_workspace/lib/core/csv_parser.ml
     file_mli: null
     summary: Parse and stream 1-minute OHLCV bars from CSV files.
     provides_values:
-      - "parse_bar_1m : string -> Types.bar_1m"
-      - "iter_bars : string -> f:(Types.bar_1m -> unit) -> unit"
+      - parse_bar_1m : string -> Types.bar_1m
+      - iter_bars : string -> f:(Types.bar_1m -> unit) -> unit
 
   - name: Parameters
     file_ml: agents_workspace/lib/core/parameters.ml
@@ -58,12 +58,12 @@ modules:
       - Parameters.t
       - Parameters.value_map
     provides_values:
-      - "make : ?bounds:(float * float) -> ?scale:Parameters.Scale.t -> ?fixed:bool -> ?integer:bool -> ?description:string -> name:string -> default:float -> unit -> Parameters.t"
-      - "clamp : Parameters.t -> float -> float"
-      - "validate : Parameters.t -> float -> (unit, string) result"
-      - "to_string : Parameters.t -> string"
-      - "default_map : Parameters.t list -> Parameters.value_map"
-      - "merge_overrides : Parameters.t list -> Parameters.value_map -> Parameters.value_map"
+      - make : ?bounds:(float * float) -> ?scale:Parameters.Scale.t -> ?fixed:bool -> ?integer:bool -> ?description:string -> name:string -> default:float -> unit -> Parameters.t
+      - clamp : Parameters.t -> float -> float
+      - validate : Parameters.t -> float -> (unit, string) result
+      - to_string : Parameters.t -> string
+      - default_map : Parameters.t list -> Parameters.value_map
+      - merge_overrides : Parameters.t list -> Parameters.value_map -> Parameters.value_map
 
   - name: Guardrails
     file_ml: agents_workspace/lib/core/guardrails.ml
@@ -72,38 +72,38 @@ modules:
     provides_types:
       - Guardrails.t
     provides_values:
-      - "default : Guardrails.t"
-      - "apply_overrides : Guardrails.t -> Yojson.Safe.t -> Guardrails.t"
-      - "load : ?path:string -> ?strategy_id:string -> unit -> (Guardrails.t, string) result"
-      - "hash : Guardrails.t -> string"
+      - default : Guardrails.t
+      - apply_overrides : Guardrails.t -> Yojson.Safe.t -> Guardrails.t
+      - load : ?path:string -> ?strategy_id:string -> unit -> (Guardrails.t, string) result
+      - hash : Guardrails.t -> string
 
   - name: Position_sizing
     file_ml: agents_workspace/lib/core/position_sizing.ml
     file_mli: agents_workspace/lib/core/position_sizing.mli
     summary: Vol-targeted position sizing utilities.
     provides_values:
-      - "vol_target_units : max:int -> signal:float -> sigma:float option -> int"
-      - "vol_target_scale : signal:float -> sigma:float option -> float"
+      - vol_target_units : max:int -> signal:float -> sigma:float option -> int
+      - vol_target_scale : signal:float -> sigma:float option -> float
 
   - name: Cost_model
     file_ml: agents_workspace/lib/core/cost_model.ml
     file_mli: agents_workspace/lib/core/cost_model.mli
-    summary: Per-contract slippage and fee adjustments.
+    summary: Per-contract slippage/fee adjustments with optional equity_base for pct PnL.
     provides_types:
       - Cost_model.config
     provides_values:
-      - "apply_per_contract : Cost_model.config -> Types.trade -> Types.trade"
+      - apply : qty:float -> Cost_model.config -> Types.trade -> Types.trade
 
   - name: Summary
     file_ml: agents_workspace/lib/core/summary.ml
     file_mli: agents_workspace/lib/core/summary.mli
-    summary: Compute and print performance statistics, sample trades, and CSV exports.
+    summary: Compute and print performance statistics; export trades and daily PnL to CSV.
     provides_values:
-      - "compute_stats : Types.trade list -> (Date.t * float) list -> Types.perf_stats"
-      - "print_stats : Types.perf_stats -> unit"
-      - "print_sample_trades : Types.trade list -> int -> unit"
-      - "export_trades_csv : outfile:string -> trades:Types.trade list -> unit"
-      - "export_daily_csv : outfile:string -> daily:(Date.t * float) list -> unit"
+      - compute_stats : ?daily_usd:(Date.t * float) list -> ?daily_pct:(Date.t * float) list -> Types.trade list -> (Date.t * float) list -> Types.perf_stats
+      - print_stats : Types.perf_stats -> unit
+      - print_sample_trades : Types.trade list -> int -> unit
+      - export_trades_csv : outfile:string -> trades:Types.trade list -> unit
+      - export_daily_csv : outfile:string -> daily:(Date.t * float) list -> ?daily_usd:(Date.t * float) list -> ?daily_pct:(Date.t * float) list -> unit -> unit
 
   - name: Indicators
     file_ml: agents_workspace/lib/features/indicators.ml
@@ -113,39 +113,39 @@ modules:
       - Indicators.Abr.t
       - Indicators.Adr.t
     provides_values:
-      - "Abr.create : n:int -> Indicators.Abr.t"
-      - "Abr.update : Indicators.Abr.t -> float -> unit"
-      - "Abr.value : Indicators.Abr.t -> float option"
-      - "Adr.create : n:int -> Indicators.Adr.t"
-      - "Adr.update : Indicators.Adr.t -> float -> unit"
-      - "Adr.value : Indicators.Adr.t -> float option"
+      - Abr.create : n:int -> Indicators.Abr.t
+      - Abr.update : Indicators.Abr.t -> float -> unit
+      - Abr.value : Indicators.Abr.t -> float option
+      - Adr.create : n:int -> Indicators.Adr.t
+      - Adr.update : Indicators.Adr.t -> float -> unit
+      - Adr.value : Indicators.Adr.t -> float option
 
   - name: Features
     file_ml: agents_workspace/lib/features/features.ml
     file_mli: agents_workspace/lib/features/features.mli
-    summary: Maintains rolling intraday VWAP/OFI/volatility feature set.
+    summary: Maintains rolling intraday VWAP/OFI/volatility/overnight feature set.
     provides_types:
       - Features.state
       - Features.snapshot
     provides_values:
-      - "create : unit -> Features.state"
-      - "update : Features.state -> Types.bar_1m -> Features.state"
-      - "snapshot : Features.state -> Features.snapshot"
+      - create : unit -> Features.state
+      - update : Features.state -> Types.bar_1m -> Features.state
+      - snapshot : Features.state -> Features.snapshot
 
   - name: Setup_builder_b1b2
     file_ml: agents_workspace/lib/strategies/setup_builder_b1b2.ml
     file_mli: agents_workspace/lib/strategies/setup_builder_b1b2.mli
     summary: Build B1/B2 daily setups and macro context from 1-minute bars.
     provides_values:
-      - "compute_daily_context_and_setups : string -> Types.setup Date.Table.t"
+      - compute_daily_context_and_setups : string -> Types.setup Date.Table.t
 
   - name: Trade_logic
     file_ml: agents_workspace/lib/strategies/trade_logic.ml
     file_mli: null
     summary: Build B1/B2 trade plans from daily setup context.
     provides_values:
-      - "tick_size : float"
-      - "build_trade_plan : Types.setup -> Types.trade_plan option"
+      - tick_size : float
+      - build_trade_plan : Types.setup -> Types.trade_plan option
 
   - name: Strategy_b1b2
     file_ml: agents_workspace/lib/strategies/strategy_b1b2.ml
@@ -154,12 +154,12 @@ modules:
     provides_types:
       - Strategy_b1b2.config
     provides_values:
-      - "default_config : Strategy_b1b2.config"
-      - "strategy_id : string"
-      - "parameter_specs : Parameters.t list"
-      - "config_of_params : Parameters.value_map -> Strategy_b1b2.config"
-      - "make_strategy : Strategy_b1b2.config -> Engine.strategy"
-      - "strategy : Engine.strategy"
+      - default_config : Strategy_b1b2.config
+      - strategy_id : string
+      - parameter_specs : Parameters.t list
+      - config_of_params : Parameters.value_map -> Strategy_b1b2.config
+      - make_strategy : Strategy_b1b2.config -> Engine.strategy
+      - strategy : Engine.strategy
 
   - name: Vwap_revert_strategy
     file_ml: agents_workspace/lib/strategies/vwap_revert_strategy.ml
@@ -168,11 +168,11 @@ modules:
     provides_types:
       - Vwap_revert_strategy.config
     provides_values:
-      - "default_config : Vwap_revert_strategy.config"
-      - "strategy_id : string"
-      - "parameter_specs : Parameters.t list"
-      - "config_of_params : Parameters.value_map -> Vwap_revert_strategy.config"
-      - "make_strategy : Vwap_revert_strategy.config -> Engine.strategy"
+      - default_config : Vwap_revert_strategy.config
+      - strategy_id : string
+      - parameter_specs : Parameters.t list
+      - config_of_params : Parameters.value_map -> Vwap_revert_strategy.config
+      - make_strategy : Vwap_revert_strategy.config -> Engine.strategy
 
   - name: Strategy_fast
     file_ml: agents_workspace/lib/strategy_fast.ml
@@ -183,7 +183,7 @@ modules:
   - name: Policy_sig
     file_ml: agents_workspace/lib/engine/policy_sig.ml
     file_mli: agents_workspace/lib/engine/policy_sig.mli
-    summary: Defines policy callback signature for strategies.
+    summary: Strategy policy callbacks for per-bar execution.
     provides_values: []
 
   - name: Engine
@@ -194,7 +194,7 @@ modules:
       - Engine.strategy
       - Engine.run_result
     provides_values:
-      - "run : Engine.strategy -> filename:string -> Engine.run_result"
+      - run : Engine.strategy -> filename:string -> Engine.run_result
 
   - name: Backtest
     file_ml: agents_workspace/lib/engine/backtest.ml
@@ -203,36 +203,37 @@ modules:
     provides_types:
       - Backtest.engine_config
     provides_values:
-      - "run : config:Backtest.engine_config -> string -> Types.setup Date.Table.t -> Types.trade list * (Date.t * float) list"
+      - run : config:Backtest.engine_config -> string -> Types.setup Date.Table.t -> Types.trade list * (Date.t * float) list
 
   - name: Multi_engine
     file_ml: agents_workspace/lib/engine/multi_engine.ml
     file_mli: agents_workspace/lib/engine/multi_engine.mli
-    summary: Run multiple strategies either independently or sharing streamed bars.
+    summary: Run multiple strategies independently or sharing streamed bars.
     provides_types:
       - Multi_engine.run_result
     provides_values:
-      - "run_all : Engine.strategy list -> filename:string -> Multi_engine.run_result list"
-      - "run_shared : Engine.strategy list -> filename:string -> Multi_engine.run_result list"
+      - run_all : Engine.strategy list -> filename:string -> Multi_engine.run_result list
+      - run_shared : Engine.strategy list -> filename:string -> Multi_engine.run_result list
 
   - name: Opt_algos
     file_ml: agents_workspace/lib/engine/opt_algos.ml
     file_mli: agents_workspace/lib/engine/opt_algos.mli
-    summary: Sampling algorithms for hyperparameter search (grid, random, LHS).
+    summary: Sampling algorithms for hyperparameter search (grid, random, LHS, Bayes helper).
     provides_types:
       - Opt_algos.sampler
     provides_values:
-      - "random_uniform : Opt_algos.sampler"
-      - "latin_hypercube : Opt_algos.sampler"
-      - "grid : steps:int -> Opt_algos.sampler"
+      - random_uniform : Opt_algos.sampler
+      - latin_hypercube : Opt_algos.sampler
+      - grid : steps:int -> Opt_algos.sampler
+      - perturb_around : center:Parameters.value_map -> specs:Parameters.t list -> sigma_frac:float -> seed:int -> Parameters.value_map
 
   - name: Stat_tests
     file_ml: agents_workspace/lib/engine/stat_tests.ml
     file_mli: agents_workspace/lib/engine/stat_tests.mli
     summary: Permutation and bootstrap utilities for guardrail testing.
     provides_values:
-      - "permutation_pvalue : ?reps:int -> ?seed:int -> metric:(float list -> float) -> float list -> float"
-      - "bootstrap_ci : ?reps:int -> ?alpha:float -> ?seed:int -> float list -> float * float"
+      - permutation_pvalue : ?reps:int -> ?seed:int -> metric:(float list -> float) -> float list -> float
+      - bootstrap_ci : ?reps:int -> ?alpha:float -> ?seed:int -> float list -> float * float
 
   - name: Robustness
     file_ml: agents_workspace/lib/engine/robustness.ml
@@ -242,12 +243,12 @@ modules:
       - Robustness.perturbation
       - Robustness.result
     provides_values:
-      - "run : specs:Parameters.t list -> bump_factors:float list -> tol_frac:float -> cliff_pct:float -> evaluate:(Parameters.value_map -> float) -> Parameters.value_map -> Robustness.result"
+      - run : specs:Parameters.t list -> bump_factors:float list -> tol_frac:float -> cliff_pct:float -> evaluate:(Parameters.value_map -> float) -> ?baseline_score:float -> Parameters.value_map -> Robustness.result
 
   - name: Optimizer
     file_ml: agents_workspace/lib/engine/optimizer.ml
     file_mli: agents_workspace/lib/engine/optimizer.mli
-    summary: Parameter search with guardrails, statistical tests, and scoring objectives.
+    summary: Parameter search with guardrails, statistical tests, caching, robustness, and sampling modes.
     provides_types:
       - Optimizer.objective
       - Optimizer.search
@@ -255,37 +256,37 @@ modules:
       - Optimizer.candidate
       - Optimizer.result
     provides_values:
-      - "run : Optimizer.job -> evaluate:(Parameters.value_map -> Optimizer.candidate) -> Optimizer.result"
+      - run : Optimizer.job -> evaluate:(Parameters.value_map -> Optimizer.candidate) -> Optimizer.result
 
   - name: Plotter
     file_ml: agents_workspace/lib/plot/plotter.ml
     file_mli: agents_workspace/lib/plot/plotter.mli
     summary: Render equity curves and histograms to PNG via Cairo.
     provides_values:
-      - "render_equity : outfile:string -> trades:Types.trade list -> unit"
-      - "render_daily_curve : outfile:string -> daily:(Date.t * float) list -> unit"
-      - "render_histogram : outfile:string -> values:float array -> bins:int -> unit"
+      - render_equity : outfile:string -> trades:Types.trade list -> unit
+      - render_daily_curve : outfile:string -> daily:(Date.t * float) list -> unit
+      - render_histogram : outfile:string -> values:float array -> bins:int -> unit
 
   - name: Strategy_fast_main
     file_ml: agents_workspace/bin/strategy_fast_main.ml
     file_mli: null
-    summary: CLI entrypoint that runs B1/B2 strategy with optional plotting and CSV export.
+    summary: CLI entrypoint that runs B1/B2 strategy with cost/qty overrides, plotting, and CSV export.
     provides_values:
-      - "main : ?plot_dir:string -> ?export_trades:string -> ?export_daily:string -> ?plot_python:string -> string -> unit"
+      - main : ?plot_dir:string -> ?export_trades:string -> ?export_daily:string -> ?plot_python:string -> cfg:Strategy_b1b2.config -> string -> unit
 
   - name: Vwap_revert_main
     file_ml: agents_workspace/bin/vwap_revert_main.ml
     file_mli: null
-    summary: CLI entrypoint that runs VWAP revert strategy with tunable params, plotting, and CSV export.
+    summary: CLI entrypoint that runs VWAP revert strategy with tunable cost/slippage, plots, and CSV export.
     provides_values:
-      - "main : slippage:float -> fees:float -> s_entry:float -> z_exit:float -> ?plot_dir:string -> ?export_trades:string -> ?export_daily:string -> ?plot_python:string -> string -> unit"
+      - main : slippage:float -> fees:float -> s_entry:float -> z_exit:float -> ?plot_dir:string -> ?export_trades:string -> ?export_daily:string -> ?plot_python:string -> string -> unit
 
   - name: Optimize_main
     file_ml: agents_workspace/bin/optimize_main.ml
     file_mli: null
-    summary: CLI job runner for parameter search/guardrails exporting best run artifacts.
+    summary: CLI job runner for parameter search/guardrails exporting best run artifacts; supports params_override and caching.
     provides_values:
-      - "run_job : job_file:string -> unit"
+      - run_job : job_file:string -> unit
 
 signatures:
   - name: Policy_sig.S
@@ -294,9 +295,9 @@ signatures:
     types:
       - t
     values:
-      - "init_day : Types.setup option -> t"
-      - "on_bar : t -> Types.bar_1m -> t * Types.trade list"
-      - "on_session_end : t -> Types.bar_1m option -> t * Types.trade list"
+      - init_day : Types.setup option -> t
+      - on_bar : t -> Types.bar_1m -> t * Types.trade list
+      - on_session_end : t -> Types.bar_1m option -> t * Types.trade list
     implemented_by:
       - Strategy_b1b2.Make(Cfg).Policy
       - Vwap_revert_strategy.Make(Cfg).Policy
@@ -309,7 +310,7 @@ functors:
     type:
       params:
         - Cfg: { cfg: Strategy_b1b2.config }
-      result: "module with Policy : Policy_sig.S and strategy : Engine.strategy"
+      result: module with Policy : Policy_sig.S and strategy : Engine.strategy
     param_signatures: []
     result_signature: null
 
@@ -320,11 +321,23 @@ functors:
     type:
       params:
         - Cfg: { cfg: Vwap_revert_strategy.config }
-      result: "module with Policy : Policy_sig.S and strategy : Engine.strategy"
+      result: module with Policy : Policy_sig.S and strategy : Engine.strategy
     param_signatures: []
     result_signature: null
 
 types:
+  - name: Types.trade
+    defined_in_module: Types
+    file_mli: null
+    description: Executed trade with entry/exit, qty, pnl (R/pts/USD/pct), and metadata.
+    representation: record
+
+  - name: Types.perf_stats
+    defined_in_module: Types
+    file_mli: null
+    description: Aggregate performance statistics (R, USD, pct) over trades and days.
+    representation: record
+
   - name: Types.direction
     defined_in_module: Types
     file_mli: null
@@ -373,12 +386,6 @@ types:
     description: Quality flag for B2 follow-through.
     representation: variant
 
-  - name: Types.trade
-    defined_in_module: Types
-    file_mli: null
-    description: Executed trade with entry/exit details, pnl, and metadata.
-    representation: record
-
   - name: Types.trade_plan
     defined_in_module: Types
     file_mli: null
@@ -396,12 +403,6 @@ types:
     file_mli: null
     description: Trade lifecycle state machine.
     representation: variant
-
-  - name: Types.perf_stats
-    defined_in_module: Types
-    file_mli: null
-    description: Aggregate performance statistics over trades and days.
-    representation: record
 
   - name: Parameters.Scale.t
     defined_in_module: Parameters
@@ -430,7 +431,7 @@ types:
   - name: Cost_model.config
     defined_in_module: Cost_model
     file_mli: agents_workspace/lib/core/cost_model.mli
-    description: Slippage and fee parameters used to adjust trades.
+    description: Slippage, fee, and optional equity_base parameters used to adjust trades.
     representation: record
 
   - name: Engine.strategy
@@ -442,7 +443,7 @@ types:
   - name: Engine.run_result
     defined_in_module: Engine
     file_mli: agents_workspace/lib/engine/engine.mli
-    description: Result of Engine.run containing setups, trades, and per-day pnl.
+    description: Result of Engine.run containing setups, trades, and per-day pnl (R/USD/pct).
     representation: record
 
   - name: Backtest.engine_config
@@ -460,13 +461,13 @@ types:
   - name: Strategy_b1b2.config
     defined_in_module: Strategy_b1b2
     file_mli: agents_workspace/lib/strategies/strategy_b1b2.mli
-    description: Session window configuration for B1/B2 strategy packaging.
+    description: Session window, qty, and cost configuration for B1/B2 strategy packaging.
     representation: record
 
   - name: Vwap_revert_strategy.config
     defined_in_module: Vwap_revert_strategy
     file_mli: agents_workspace/lib/strategies/vwap_revert_strategy.mli
-    description: Parameter set for VWAP mean-reversion policy.
+    description: Parameter set for VWAP mean-reversion policy (features, risk, cost).
     representation: record
 
   - name: Features.state
@@ -520,13 +521,13 @@ types:
   - name: Optimizer.search
     defined_in_module: Optimizer
     file_mli: agents_workspace/lib/engine/optimizer.mli
-    description: Search mode (grid, random, latin hypercube) with parameters.
+    description: Search mode (grid, random, latin hypercube, Bayes).
     representation: variant
 
   - name: Optimizer.job
     defined_in_module: Optimizer
     file_mli: agents_workspace/lib/engine/optimizer.mli
-    description: Parameter search job configuration including specs, objective, and guardrails.
+    description: Parameter search job configuration including specs, objective, guardrails, robustness, caching.
     representation: record
 
   - name: Optimizer.candidate
@@ -538,7 +539,7 @@ types:
   - name: Optimizer.result
     defined_in_module: Optimizer
     file_mli: agents_workspace/lib/engine/optimizer.mli
-    description: Best candidate summary plus guardrail/test counts.
+    description: Best candidate summary plus guardrail/rejection counts and cache hits.
     representation: record
 
 pipelines:
@@ -546,10 +547,10 @@ pipelines:
     module: Strategy_fast_main
     file_ml: agents_workspace/bin/strategy_fast_main.ml
     file_mli: null
-    description: Command-line B1/B2 backtest over CSV input with optional PNG plots and CSV export.
+    description: Command-line B1/B2 backtest over CSV input with optional cost/qty overrides, PNG plots, and CSV export.
     signature: null
     entry_value: main
-    entry_type: "?plot_dir:string -> ?export_trades:string -> ?export_daily:string -> ?plot_python:string -> string -> unit"
+    entry_type: "?plot_dir:string -> ?export_trades:string -> ?export_daily:string -> ?plot_python:string -> cfg:Strategy_b1b2.config -> string -> unit"
     uses_modules:
       - Strategy_fast
       - Engine
@@ -558,6 +559,14 @@ pipelines:
       - Plotter
     uses_signatures:
       - Policy_sig.S
+
+# tools (non-OCaml helpers referenced by pipelines)
+tools:
+  - path: agents_workspace/tools/plot_trades.py
+    summary: Python matplotlib/pandas plotter for trades/daily CSVs (R/USD/pct equity curves and histograms).
+    used_by:
+      - b1b2_cli
+      - vwap_revert_cli
 
   - id: vwap_revert_cli
     module: Vwap_revert_main
@@ -580,7 +589,7 @@ pipelines:
     module: Optimize_main
     file_ml: agents_workspace/bin/optimize_main.ml
     file_mli: null
-    description: CLI runner that loads a JSON job and performs guarded parameter search, exporting CSV/JSON outputs.
+    description: CLI runner that loads a JSON job and performs guarded parameter search (grid/random/LHS/Bayes), supporting params_override, robustness bumps, and caching; exports CSV/JSON outputs.
     signature: null
     entry_value: run_job
     entry_type: "job_file:string -> unit"
