@@ -22,3 +22,6 @@ _build/
 
 # local data / notebooks
 *.ipynb_checkpoints
+
+# internal git metadata for pricing_logic_optimization mirror
+.git.pricing_logic_optimization

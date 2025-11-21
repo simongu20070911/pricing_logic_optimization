@@ -129,75 +129,33 @@ module Pure (Cfg : sig val cfg : config end) : SS.S = struct
     | _ -> (state, [])
 end
 
-module Make (Cfg : sig val cfg : config end) = struct
-  module Policy : Policy_sig.S = struct
-    type t = {
-      plan : trade_plan option;
-      trade_state : trade_state;
-    }
+module Policy_of_pure (Cfg : sig val cfg : config end) : Policy_sig.S = struct
+  type t = Pure(Cfg).state
+  module PS = Pure(Cfg)
 
-    let init_day setup_opt =
-      match setup_opt with
-      | None -> { plan = None; trade_state = No_trade }
-      | Some s ->
-          (match Trade_logic.build_trade_plan s with
-           | None -> { plan = None; trade_state = No_trade }
-      | Some plan -> { plan = Some plan; trade_state = Pending })
-
-    let on_bar state (bar : bar_1m) : t * trade list =
-      let minute_of_day = bar.ts.minute_of_day in
-      match state.plan with
-      | None -> (state, [])
-      | Some plan ->
-          let in_session = SC.Session.within ~start:Cfg.cfg.session_start_min ~end_:Cfg.cfg.session_end_min bar in
-          if minute_of_day < b2_min || not in_session then
-            (state, [])
-          else begin
-            let plan = downgrade_if_needed plan ~minute_of_day in
-            let trade_state, trades =
-              TT.step ~plan ~state:state.trade_state ~bar
-                ~record_trade:(fun ~active ~exit_ts ~exit_price ~exit_reason ->
-                    record_trade ~cfg:Cfg.cfg ~plan ~active ~exit_ts ~exit_price
-                      ~reason:exit_reason)
-            in
-            ({ plan = Some plan; trade_state }, trades)
-          end
-
-    let on_session_end state last_bar =
-      match state.plan, state.trade_state, last_bar with
-      | Some plan, Active active, Some lb ->
-          let trade =
-            SC.Session.eod_flat ~qty:Cfg.cfg.qty ~r_pts:plan.r_pts Cfg.cfg.cost
-              ~direction:plan.direction ~entry_ts:active.entry_ts
-              ~entry_px:plan.entry_price ~last_bar:lb
-              ~meta:[
-                ("strategy", strategy_id);
-                ("target_mult", Float.to_string plan.target_mult);
-                ("abr_prev", Float.to_string plan.abr_prev);
-                ("b1_range", Float.to_string plan.b1_range);
-                ("b2_follow",
-                 match plan.b2_follow with
-                 | Follow_good -> "good"
-                 | Follow_poor -> "poor");
-              ]
-          in
-          ({ plan = state.plan; trade_state = Done }, [ trade ])
-      | _ -> (state, [])
-
-  end
-
-  let strategy : Engine.strategy = {
-    id = strategy_id;
-    session_start_min = Cfg.cfg.session_start_min;
-    session_end_min   = Cfg.cfg.session_end_min;
-    build_setups = Some Setup_builder.compute_daily_context_and_setups;
-    policy = (module Policy);
+  let env = {
+    SS.session_start_min = Cfg.cfg.session_start_min;
+    session_end_min = Cfg.cfg.session_end_min;
+    qty = Cfg.cfg.qty;
+    cost = Cfg.cfg.cost;
   }
 
+  let init_day setup_opt = PS.init setup_opt
+  let on_bar st bar =
+    let st', trades = PS.step env st bar in
+    st', trades
+  let on_session_end st last_bar = PS.finalize_day env st last_bar
 end
+
 let make_strategy cfg =
-  let module M = Make(struct let cfg = cfg end) in
-  M.strategy
+  let module P = Policy_of_pure(struct let cfg = cfg end) in
+  {
+    Engine.id = strategy_id;
+    session_start_min = cfg.session_start_min;
+    session_end_min = cfg.session_end_min;
+    build_setups = Some Setup_builder.compute_daily_context_and_setups;
+    policy = (module P);
+  }
 
 let strategy = make_strategy default_config
 

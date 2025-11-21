@@ -21,7 +21,7 @@ module Opt = Engine.Optimizer
 type strat_pack = {
   id : string;
   specs : Parameters.t list;
-  build : Parameters.value_map -> Engine.Engine.strategy;
+  build : Parameters.value_map -> Engine.Engine.pure_strategy;
 }
 
 let strat_registry : strat_pack list =
@@ -31,14 +31,14 @@ let strat_registry : strat_pack list =
       specs = Strategies.Strategy_b1b2.parameter_specs;
       build = (fun params ->
           let cfg = Strategies.Strategy_b1b2.config_of_params params in
-          Strategies.Strategy_b1b2.make_strategy cfg);
+          Strategies.Strategy_b1b2.make_pure_strategy cfg);
     };
     {
       id = Strategies.Vwap_revert_strategy.strategy_id;
       specs = Strategies.Vwap_revert_strategy.parameter_specs;
       build = (fun params ->
           let cfg = Strategies.Vwap_revert_strategy.config_of_params params in
-          Strategies.Vwap_revert_strategy.make_strategy cfg);
+          Strategies.Vwap_revert_strategy.make_pure_strategy cfg);
     };
   ]
 
@@ -135,7 +135,7 @@ let run_job ~job_file =
     let p = Map.fold overrides ~init:params ~f:(fun ~key ~data acc -> Map.set acc ~key ~data) in
     let strategy = strat_pack.build p in
     let { Engine.Engine.setups = _; trades; daily_pnl; daily_pnl_usd = _; daily_pnl_pct = _ } =
-      Engine.Engine.run strategy ~filename:datafile
+      Engine.Engine.run_pure strategy ~filename:datafile
     in
     { Opt.params = p; score = 0.; trades; daily_pnl }
   in

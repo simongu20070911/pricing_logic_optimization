@@ -20,7 +20,6 @@ end
 module Engine = struct
   module Engine = Engine
   module Strategy_sig = Strategy_sig
-  module Policy_adapter = Policy_adapter
   module Multi_engine = Multi_engine
   module Policy_sig = Policy_sig
   module Backtest = Backtest

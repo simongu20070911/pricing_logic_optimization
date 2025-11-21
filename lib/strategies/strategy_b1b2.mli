@@ -21,7 +21,4 @@ val make_pure_strategy : config -> Engine.pure_strategy
 
 val strategy_pure : Engine.pure_strategy
 
-module Make (_ : sig val cfg : config end) : sig
-  module Policy : Policy_sig.S
-  val strategy : Engine.strategy
-end
+module Pure (_ : sig val cfg : config end) : Strategy_sig.S

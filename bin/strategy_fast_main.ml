@@ -25,9 +25,9 @@ let plot dir (result : Strategy_fast.Engine.Engine.run_result) =
   render_histogram ~outfile:(Filename.concat dir "pnl_hist.png") ~values:pnl ~bins:40
 
 let main ?plot_dir ?export_trades ?export_daily ?plot_python ~cfg filename =
-  let strat = Strategy_fast.Strategies.Strategy_b1b2.make_strategy cfg in
+  let strat = Strategy_fast.Strategies.Strategy_b1b2.make_pure_strategy cfg in
   let (result : Strategy_fast.Engine.Engine.run_result) =
-    Strategy_fast.Engine.Engine.run strat ~filename
+    Strategy_fast.Engine.Engine.run_pure strat ~filename
   in
   let n_setups = Hashtbl.length result.setups in
   printf "Number of B1 setups (filtered days): %d\n%!" n_setups;

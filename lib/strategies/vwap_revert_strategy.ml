@@ -5,17 +5,16 @@ open Time_utils
 module F = Features
 module PS = Position_sizing
 module SC = Strategy_common
+module SS = Strategy_sig
 
-[@@@warning "-27-32-69"]
-
-(* Configurable parameters *)
+(* Config *)
 type config = {
   a1 : float;
   a2 : float;
   b1 : float;
   b2 : float;
   s_entry : float;
-  z_exit : float;
+  z_exit  : float;
   time_stop_min : int;
   stop_ticks : float;
   max_units : int;
@@ -35,8 +34,6 @@ let default_config = {
   cost = {
     tick_size = 0.25;
     tick_value = 12.5;
-    (* For 3–6 ES contracts RTH on IBKR Pro, a realistic
-       assumption is ~1.0 tick round‑trip slippage plus ~$4 RT fees. *)
     slippage_roundtrip_ticks = 1.0;
     fee_per_contract = 4.0;
     equity_base = None;
@@ -95,7 +92,7 @@ type position =
   | Long_pos of { entry_ts : timestamp; entry_price : float; target_units : int }
   | Short_pos of { entry_ts : timestamp; entry_price : float; target_units : int }
 
-type t = {
+type state = {
   features : F.state;
   position : position;
   cfg : config;
@@ -125,8 +122,8 @@ let compute_signal cfg (snap : F.snapshot) : float option =
   | _ -> None
 
 let build_trade ~direction ~(entry_time : timestamp) ~entry_price
-    ~(exit_time : timestamp) ~exit_price
-    ~(reason : exit_reason) ~(target_units : int) ~(state : t)
+    ~(exit_time : timestamp) ~(exit_price : float)
+    ~(reason : exit_reason) ~(target_units : int) ~(state : state)
     ~(meta : (string * string) list) : trade =
   SC.Trade.make
     ~qty:(Float.of_int target_units) ~r_pts:1.0 state.cfg.cost direction
@@ -134,32 +131,32 @@ let build_trade ~direction ~(entry_time : timestamp) ~entry_price
     ~exit_ts:exit_time ~exit_px:exit_price ~reason
     ~meta:(("strategy", strategy_id) :: ("target_units", Int.to_string target_units) :: meta)
 
-let on_bar (state : t) (bar : bar_1m) : t * trade list =
+let on_bar (state : state) (bar : bar_1m) : state * trade list =
   let features = F.update state.features bar in
   let snap = F.snapshot features in
   let cfg = state.cfg in
   let stop_distance_pts = cfg.stop_ticks *. cfg.cost.tick_size in
 
-  if not (SC.Session.within ~start:rth_start_min ~end_:rth_end_min bar) then
-    ({ features; position = Flat; cfg }, [])
+  let in_session =
+    bar.ts.minute_of_day >= rth_start_min && bar.ts.minute_of_day <= rth_end_min
+  in
+  if not in_session then ({ features; position = Flat; cfg }, [])
   else
     let signal_opt = compute_signal cfg snap in
     match state.position, signal_opt with
     | Flat, Some s when Float.(abs s >= cfg.s_entry) ->
         let sigma = snap.rv60 in
         let target_units = PS.vol_target_units ~max:cfg.max_units ~signal:s ~sigma in
-        if target_units <= 0 then
-          ({ features; position = Flat; cfg }, [])
+        if target_units <= 0 then ({ features; position = Flat; cfg }, [])
         else
-        let direction = if Float.(s > 0.) then Long else Short in
-        let position =
-          match direction with
-          | Long  -> Long_pos { entry_ts = bar.ts; entry_price = bar.close; target_units }
-          | Short -> Short_pos { entry_ts = bar.ts; entry_price = bar.close; target_units }
-        in
-        ({ features; position; cfg }, [])
-    | Flat, _ ->
-        ({ features; position = Flat; cfg }, [])
+          let direction = if Float.(s > 0.) then Long else Short in
+          let position =
+            match direction with
+            | Long  -> Long_pos { entry_ts = bar.ts; entry_price = bar.close; target_units }
+            | Short -> Short_pos { entry_ts = bar.ts; entry_price = bar.close; target_units }
+          in
+          ({ features; position; cfg }, [])
+    | Flat, _ -> ({ features; position = Flat; cfg }, [])
     | Long_pos pos, signal_opt ->
         let entry_ts = pos.entry_ts in
         let entry_price = pos.entry_price in
@@ -235,7 +232,7 @@ let on_bar (state : t) (bar : bar_1m) : t * trade list =
           else
             ({ features; position = Short_pos pos; cfg }, [])
 
-let on_session_end (state : t) (last_bar : bar_1m option) : t * trade list =
+let on_session_end (state : state) (last_bar : bar_1m option) : state * trade list =
   match state.position, last_bar with
   | Flat, _ -> (state, [])
   | (Long_pos _ | Short_pos _), None -> ({ state with position = Flat }, [])
@@ -256,23 +253,64 @@ let on_session_end (state : t) (last_bar : bar_1m option) : t * trade list =
       in
       ({ state with position = Flat }, [ trade ])
 
-module Make (Cfg : sig val cfg : config end) = struct
-  module Policy : Policy_sig.S = struct
-    type nonrec t = t
-    let init_day setup = init_day Cfg.cfg setup
-    let on_bar = on_bar
-    let on_session_end = on_session_end
-  end
+module Pure (Cfg : sig val cfg : config end) : SS.S with type state = state = struct
+  type nonrec state = state
+  let init setup = init_day Cfg.cfg setup
 
-  let strategy : Engine.strategy = {
-    id = strategy_id;
-    session_start_min = rth_start_min;
-    session_end_min   = rth_end_min;
-    build_setups = (None : (string -> setup Core.Date.Table.t) option);
-    policy = (module Policy);
+  let step (env : SS.env) st bar =
+    let in_session =
+      bar.ts.minute_of_day >= env.session_start_min
+      && bar.ts.minute_of_day <= env.session_end_min
+    in
+    if not in_session then ({ st with position = Flat }, [])
+    else on_bar st bar
+
+  let finalize_day (_env : SS.env) st last_bar = on_session_end st last_bar
+end
+
+module Policy_of_pure (Cfg : sig val cfg : config end) : Policy_sig.S = struct
+  module P = Pure(Cfg)
+  type t = P.state
+
+  let env = {
+    SS.session_start_min = rth_start_min;
+    session_end_min = rth_end_min;
+    qty = 1.0; (* not used; sizing handled internally *)
+    cost = Cfg.cfg.cost;
   }
+
+  let init_day setup_opt = P.init setup_opt
+  let on_bar st bar =
+    let st', trades = P.step env st bar in
+    st', trades
+  let on_session_end st last_bar = P.finalize_day env st last_bar
 end
 
 let make_strategy config =
-  let module M = Make(struct let cfg = config end) in
-  M.strategy
+  let module M = Policy_of_pure(struct let cfg = config end) in
+  {
+    Engine.id = strategy_id;
+    session_start_min = rth_start_min;
+    session_end_min = rth_end_min;
+    build_setups = None;
+    policy = (module M);
+  }
+
+let strategy = make_strategy default_config
+
+let make_pure_strategy cfg =
+  let env = {
+    SS.session_start_min = rth_start_min;
+    session_end_min = rth_end_min;
+    qty = 1.0;
+    cost = cfg.cost;
+  } in
+  let module S = Pure(struct let cfg = cfg end) in
+  {
+    Engine._id = strategy_id;
+    env;
+    build_setups = None;
+    strategy = (module S);
+  }
+
+let strategy_pure = make_pure_strategy default_config
